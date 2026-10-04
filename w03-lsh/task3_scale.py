@@ -35,33 +35,81 @@ class BruteForce:
 
 
 class YourFinder:
-    """Your near-duplicate finder.
-
-        __init__(threshold)
-        find(docs, similarity) -> {(i, j), ...}
-
-    `similarity(a, b)` is the only way to compare two documents, and every call
-    is counted. Everything else - signatures, banding, bucketing - is free, in
-    the sense that the harness does not charge you for it. That is deliberate:
-    it is also roughly true at scale, where the comparison is the expensive
-    part and the hashing is linear.
-
-    Two knobs decide everything:
-
-        the number of hashes in a signature
-        how many bands you split it into
-
-    §3.4.2 gives you the relationship between those and the probability that a
-    pair at similarity s becomes a candidate. It is an S-curve, and where its
-    step sits is something you choose. Choose it on purpose and be able to say
-    why in observation.md - a threshold of 0.8 does not mean bands should be
-    anything in particular until you have done the arithmetic.
-
-    You may reuse your Task 1 code.
-    """
+    """LSH-based near-duplicate finder."""
 
     def __init__(self, threshold):
-        raise NotImplementedError("write your finder")
+        self.threshold = threshold
+
+        # 120 MinHash functions split into 30 bands.
+        # Each band contains 4 rows.
+        self.n_hashes = 120
+        self.bands = 30
+        self.rows_per_band = self.n_hashes // self.bands
+
+        # Prime larger than the shingle vocabulary (0..4999).
+        self.prime = 10007
+
+        # Deterministic hash parameters.
+        self.a = [
+            (i * 7919 + 1237) % self.prime
+            for i in range(self.n_hashes)
+        ]
+        self.b = [
+            (i * 104729 + 4321) % self.prime
+            for i in range(self.n_hashes)
+        ]
+
+    def _signature(self, doc):
+        """Compute a 120-value MinHash signature for one document."""
+        sig = [self.prime] * self.n_hashes
+
+        for x in doc:
+            for h in range(self.n_hashes):
+                value = (self.a[h] * x + self.b[h]) % self.prime
+
+                if value < sig[h]:
+                    sig[h] = value
+
+        return sig
 
     def find(self, docs, similarity):
-        raise NotImplementedError
+        """Use LSH to generate candidates, then verify only candidates."""
+        signatures = [self._signature(doc) for doc in docs]
+
+        candidates = set()
+
+        for band in range(self.bands):
+            start = band * self.rows_per_band
+            end = start + self.rows_per_band
+
+            buckets = {}
+
+            for i, sig in enumerate(signatures):
+                key = tuple(sig[start:end])
+
+                if key not in buckets:
+                    buckets[key] = []
+
+                buckets[key].append(i)
+
+            for indices in buckets.values():
+                if len(indices) < 2:
+                    continue
+
+                for x in range(len(indices)):
+                    for y in range(x + 1, len(indices)):
+                        i = indices[x]
+                        j = indices[y]
+
+                        if i > j:
+                            i, j = j, i
+
+                        candidates.add((i, j))
+
+        result = set()
+
+        for i, j in candidates:
+            if similarity(docs[i], docs[j]) >= self.threshold:
+                result.add((i, j))
+
+        return result

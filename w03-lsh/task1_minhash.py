@@ -30,37 +30,74 @@ BOOK_HASHES = [lambda r: (r + 1) % 5, lambda r: (3 * r + 1) % 5]
 
 def jaccard(a, b):
     """|a and b| / |a or b|. Empty union is 0, not an error."""
-    raise NotImplementedError("jaccard similarity")
+    union = a | b
+
+    if not union:
+        return 0
+
+    return len(a & b) / len(union)
 
 
 def minhash_signatures(columns, hashes, n_rows):
-    """Build the signature matrix, one pass over the rows.
+    n_cols = len(columns)
+    signatures = [[n_rows] * len(hashes) for _ in range(n_cols)]
+    row_to_columns = [[] for _ in range(n_rows)]
 
-    `columns` is [set_of_row_numbers, ...], one entry per document.
-    Return [[sig for each hash] for each column].
+    for c, rows in enumerate(columns):
+        for r in rows:
+            row_to_columns[r].append(c)
 
-    The algorithm in §3.3.5 walks each row **once** and updates the signature
-    of every column that has a 1 in it:
+    for r in range(n_rows):
+        for c in row_to_columns[r]:
+            for h, hash_fn in enumerate(hashes):
+                value = hash_fn(r)
+                if value < signatures[c][h]:
+                    signatures[c][h] = value
 
-        sig[h][c] = min(sig[h][c], h(r))
+    return signatures
 
-    Doing it that way is the point. If you sort or re-scan per column you have
-    written something correct that does not survive a dataset that does not fit
-    in memory, and not fitting in memory is what this course is about.
-    """
-    raise NotImplementedError("signature matrix")
 
 
 def lsh_candidates(signatures, bands):
-    """Split each signature into `bands` bands and hash each band.
+    """Return pairs that collide in at least one LSH band."""
+    if not signatures:
+        return set()
 
-    Two columns are candidates if they land in the same bucket for **at least
-    one** band. Return {(i, j), ...} with i < j.
+    n_cols = len(signatures)
+    sig_len = len(signatures[0])
 
-    The signature length must divide evenly by `bands`, or you have to decide
-    what to do with the remainder. Say what you decided.
-    """
-    raise NotImplementedError("LSH candidate pairs")
+    if sig_len % bands != 0:
+        raise ValueError("signature length must be divisible by bands")
+
+    rows_per_band = sig_len // bands
+    candidates = set()
+
+    for b in range(bands):
+        buckets = {}
+
+        start = b * rows_per_band
+        end = start + rows_per_band
+
+        for i in range(n_cols):
+            key = tuple(signatures[i][start:end])
+
+            if key not in buckets:
+                buckets[key] = []
+
+            buckets[key].append(i)
+
+        for indices in buckets.values():
+            for x in range(len(indices)):
+                for y in range(x + 1, len(indices)):
+                    i = indices[x]
+                    j = indices[y]
+
+                    if i > j:
+                        i, j = j, i
+
+                    candidates.add((i, j))
+
+    return candidates
 
 
 # ------------------------------------------------------------------- harness
